@@ -29,7 +29,7 @@ This repository hosts a GitHub Actions workflow that builds a complete Arch Linu
    On your target machine or in your chroot environment, extract the tarball:
 
 ```bash
-tar --zstd -xvf arch-full-system-YYYYMMDD.tar.zst -C /your/target/directory
+tar --zstd -xvf arch-custom-rootfs.tar.zst -C /your/target/directory
 ```
 
 ## Disclaimer
