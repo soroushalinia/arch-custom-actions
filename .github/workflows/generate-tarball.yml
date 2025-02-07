@@ -34,7 +34,7 @@ jobs:
               sudo \
               zsh
 
-            tar --zstd --numeric-owner --xattrs --acls -C /mnt/arch-root -cf /workspace/arch-installation.tar.zst \
+            tar --zstd --numeric-owner --xattrs --acls -C /mnt/arch-root -cf /workspace/arch-custom-rootfs.tar.zst \
               --exclude=./.dockerenv \
               --exclude=./.dockerinit \
               --exclude=./sys/* \
