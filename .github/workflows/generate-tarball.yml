@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Build Minimal Arch Linux Installation in Docker
         run: |
@@ -55,7 +55,7 @@ jobs:
           '
 
       - name: Upload Arch Installation Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: arch-installation
           path: arch-custom-rootfs.tar.zst
