@@ -1,0 +1,61 @@
+name: Build Minimal Arch Tarball
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Build Minimal Arch Linux Installation in Docker
+        run: |
+          docker run --privileged --rm -v "$(pwd)":/workspace archlinux:latest bash -c '
+            set -e
+            pacman -Sy --noconfirm arch-install-scripts
+            mkdir -p /mnt/arch-root
+            pacstrap /mnt/arch-root \
+              base \
+              linux \
+              linux-firmware \
+              git \
+              curl \
+              nano \
+              ukify \
+              btrfs-progs \
+              intel-ucode \
+              amd-ucode \
+              podman \
+              toolbox \
+              networkmanager \
+              openssh \
+              sudo \
+              zsh
+
+            tar --zstd --numeric-owner --xattrs --acls -C /mnt/arch-root -cf /workspace/arch-installation.tar.zst \
+              --exclude=./.dockerenv \
+              --exclude=./.dockerinit \
+              --exclude=./sys/* \
+              --exclude=./proc/* \
+              --exclude=./dev/* \
+              --exclude=./etc/machine-id \
+              --exclude=./etc/resolv.conf \
+              --exclude=./etc/pacman.d/gnupg/openpgp-revocs.d/* \
+              --exclude=./etc/pacman.d/gnupg/private-keys-v1.d/* \
+              --exclude=./etc/pacman.d/gnupg/pubring.gpg~ \
+              --exclude=./etc/pacman.d/gnupg/S.* \
+              --exclude=./root/* \
+              --exclude=./tmp/* \
+              --exclude=./var/cache/pacman/pkg/* \
+              --exclude=./var/lib/pacman/sync/* \
+              --exclude=./var/tmp/* \
+              .
+          '
+
+      - name: Upload Arch Installation Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: arch-installation
+          path: arch-custom-rootfs.tar.zst
