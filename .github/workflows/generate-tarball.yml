@@ -41,8 +41,8 @@ jobs:
             ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} /mnt/arch-root/etc/localtime
             echo "${{ github.event.inputs.timezone }}" > /mnt/arch-root/etc/timezone
 
-            useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
-            echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | chroot /mnt/arch-root chpasswd
+            arch-chroot /mnt/arch-root useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
+            echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | arch-chroot /mnt/arch-root chpasswd
 
             tar --zstd --numeric-owner --xattrs --acls -C /mnt/arch-root -cf /workspace/arch-custom-rootfs.tar.zst \
               --exclude=./.dockerenv \
