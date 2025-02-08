@@ -31,6 +31,7 @@ jobs:
             set -e
             pacman -Sy --noconfirm arch-install-scripts
 
+            mkdir -p /mnt/arch-root
             pacstrap /mnt/arch-root base linux linux-firmware git curl nano ukify btrfs-progs \
               intel-ucode amd-ucode podman toolbox networkmanager openssh sudo zsh dosfstools
 
