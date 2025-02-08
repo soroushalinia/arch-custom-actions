@@ -27,9 +27,6 @@ jobs:
 
       - name: Create rootfs directory and Build Arch Linux Installation
         run: |
-          # Create the rootfs folder
-          mkdir -p /mnt/arch-root
-
           docker run --privileged --rm -v "$(pwd)":/workspace -v /mnt:/mnt archlinux:latest bash -c '
             set -e
             pacman -Sy --noconfirm arch-install-scripts
@@ -40,11 +37,9 @@ jobs:
             cp /rootfs/pacman.conf /mnt/arch-root/etc/pacman.conf
             cp /rootfs/mirrorlist /mnt/arch-root/etc/pacman.d/mirrorlist
 
-            # Set the timezone provided by the user
             ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} /mnt/arch-root/etc/localtime
             echo "${{ github.event.inputs.timezone }}" > /mnt/arch-root/etc/timezone
 
-            # Create a user with provided username, password, and shell
             useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
             echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | chroot /mnt/arch-root chpasswd
 
