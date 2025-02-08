@@ -2,6 +2,21 @@ name: Build Minimal Arch Tarball
 
 on:
   workflow_dispatch:
+    inputs:
+      username:
+        description: "Username for the system"
+        required: true
+      password:
+        description: "Password for the user"
+        required: true
+      shell:
+        description: "Shell path for the user (use /usr/bin/zsh if you have zsh installed)"
+        required: true
+        default: "/usr/bin/bash"
+      timezone:
+        description: "Timezone for the system (e.g., America/New_York)"
+        required: true
+        default: "America/New_York"
 
 jobs:
   build:
@@ -10,29 +25,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build Minimal Arch Linux Installation in Docker
+      - name: Create rootfs directory and Build Arch Linux Installation
         run: |
-          docker run --privileged --rm -v "$(pwd)":/workspace archlinux:latest bash -c '
+          # Create the rootfs folder
+          mkdir -p /mnt/arch-root
+
+          docker run --privileged --rm -v "$(pwd)":/workspace -v /mnt:/mnt archlinux:latest bash -c '
             set -e
             pacman -Sy --noconfirm arch-install-scripts
-            mkdir -p /mnt/arch-root
-            pacstrap /mnt/arch-root \
-              base \
-              linux \
-              linux-firmware \
-              git \
-              curl \
-              nano \
-              ukify \
-              btrfs-progs \
-              intel-ucode \
-              amd-ucode \
-              podman \
-              toolbox \
-              networkmanager \
-              openssh \
-              sudo \
-              zsh
+
+            pacstrap /mnt/arch-root base linux linux-firmware git curl nano ukify btrfs-progs \
+              intel-ucode amd-ucode podman toolbox networkmanager openssh sudo zsh dosfstools
+
+            cp /rootfs/pacman.conf /mnt/arch-root/etc/pacman.conf
+            cp /rootfs/mirrorlist /mnt/arch-root/etc/pacman.d/mirrorlist
+
+            # Set the timezone provided by the user
+            ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} /mnt/arch-root/etc/localtime
+            echo "${{ github.event.inputs.timezone }}" > /mnt/arch-root/etc/timezone
+
+            # Create a user with provided username, password, and shell
+            useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
+            echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | chroot /mnt/arch-root chpasswd
 
             tar --zstd --numeric-owner --xattrs --acls -C /mnt/arch-root -cf /workspace/arch-custom-rootfs.tar.zst \
               --exclude=./.dockerenv \
