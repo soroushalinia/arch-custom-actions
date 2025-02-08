@@ -35,8 +35,8 @@ jobs:
             pacstrap /mnt/arch-root base linux linux-firmware git curl nano ukify btrfs-progs \
               intel-ucode amd-ucode podman toolbox networkmanager openssh sudo zsh dosfstools
 
-            cp /workspace/pacman.conf /mnt/arch-root/etc/pacman.conf
-            cp /workspace/mirrorlist /mnt/arch-root/etc/pacman.d/mirrorlist
+            cp /workspace/rootfs/pacman.conf /mnt/arch-root/etc/pacman.conf
+            cp /workspace/rootfs/mirrorlist /mnt/arch-root/etc/pacman.d/mirrorlist
 
             ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} /mnt/arch-root/etc/localtime
             echo "${{ github.event.inputs.timezone }}" > /mnt/arch-root/etc/timezone
