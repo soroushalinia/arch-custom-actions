@@ -4,16 +4,68 @@ on:
   workflow_dispatch:
     inputs:
       iso_name:
-        description: "The name of the ISO file to create (e.g., arch-custom.iso)"
+        description: "The name of the ISO file to create"
         required: true
         default: "arch-custom.iso"
+      username:
+        description: "Username for the system"
+        required: true
+      password:
+        description: "Password for the user"
+        required: true
+      shell:
+        description: "User's shell path"
+        required: true
+        default: "/usr/bin/bash"
       timezone:
-        description: "System timezone to propagate if needed"
+        description: "Timezone for the system"
         required: true
         default: "UTC"
 
 jobs:
+  build_rootfs:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ steps.set-artifact.outputs.name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Arch RootFS
+        run: |
+          docker run --privileged --rm -v "$(pwd)":/workspace -v /mnt:/mnt archlinux:latest bash -c '
+            set -e
+            pacman -Sy --noconfirm arch-install-scripts
+
+            mkdir -p /mnt/arch-root
+            pacstrap /mnt/arch-root base linux linux-firmware git curl nano ukify btrfs-progs \
+              intel-ucode amd-ucode podman toolbox networkmanager openssh sudo zsh dosfstools
+
+            cp /workspace/rootfs/pacman.conf /mnt/arch-root/etc/pacman.conf
+            cp /workspace/rootfs/mirrorlist /mnt/arch-root/etc/pacman.d/mirrorlist
+
+            ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} /mnt/arch-root/etc/localtime
+            echo "${{ github.event.inputs.timezone }}" > /mnt/arch-root/etc/timezone
+
+            arch-chroot /mnt/arch-root useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
+            echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | arch-chroot /mnt/arch-root chpasswd
+
+            tar --zstd --numeric-owner --xattrs --acls -C /mnt/arch-root -cf /workspace/arch-custom-rootfs.tar.zst \
+              --exclude=./{.dockerenv,.dockerinit,sys/*,proc/*,dev/*,etc/machine-id,etc/resolv.conf} \
+              --exclude=./etc/pacman.d/gnupg/* \
+              --exclude=./{root,tmp,var/tmp,var/cache/pacman/pkg,var/lib/pacman/sync}/* \
+              .
+          '
+
+      - name: Upload RootFS Artifact
+        id: set-artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-installation
+          path: arch-custom-rootfs.tar.zst
+
   build_iso:
+    needs: build_rootfs
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -33,7 +85,6 @@ jobs:
           sudo apt update
           sudo apt install -y grub-efi-amd64-bin xorriso zstd
 
-          echo "Creating directory structure..."
           mkdir -p iso/EFI/boot iso/boot iso/grub
           mkdir -p rootfs
 
