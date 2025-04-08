@@ -22,41 +22,41 @@ jobs:
   prepare:
     name: Prepare Base RootFS
     runs-on: ubuntu-latest
-    container:
-      image: archlinux:latest
-    outputs:
-      rootfs_dir: ${{ steps.set-rootfs-dir.outputs.rootfs_dir }}
     steps:
-      - name: Install dependencies in Arch container
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        shell: bash
         run: |
-          pacman -Sy --noconfirm arch-install-scripts
-          # Additional tools may need to be installed via pacman or via package management workarounds
+          set -e
+          sudo apt update
+          sudo apt install -y grub-efi-amd64-bin xorriso zstd arch-install-scripts
 
       - name: Generate base system
         id: build-base
+        shell: bash
         run: |
           set -e
-          ROOTFS="/tmp/arch-root"
-          mkdir -p $ROOTFS
-          pacstrap $ROOTFS base linux linux-firmware git curl nano btrfs-progs \
+          export ROOTFS="/arch-root"
+          sudo mkdir -p $ROOTFS
+          sudo pacstrap $ROOTFS base linux linux-firmware git curl nano btrfs-progs \
             intel-ucode amd-ucode podman toolbox networkmanager openssh sudo zsh dosfstools
 
           # Replace pacman.conf and mirrorlist with your own if needed.
-          cp workspace/rootfs/pacman.conf $ROOTFS/etc/pacman.conf
-          cp workspace/rootfs/mirrorlist $ROOTFS/etc/pacman.d/mirrorlist
+          sudo cp workspace/rootfs/pacman.conf $ROOTFS/etc/pacman.conf
+          sudo cp workspace/rootfs/mirrorlist $ROOTFS/etc/pacman.d/mirrorlist
 
-          ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} $ROOTFS/etc/localtime
-          echo "${{ github.event.inputs.timezone }}" | tee $ROOTFS/etc/timezone
+          sudo ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} $ROOTFS/etc/localtime
+          echo "${{ github.event.inputs.timezone }}" | sudo tee $ROOTFS/etc/timezone
 
           # Create user
-          arch-chroot $ROOTFS useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
-          echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | arch-chroot $ROOTFS chpasswd
+          sudo arch-chroot $ROOTFS useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
+          echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | sudo arch-chroot $ROOTFS chpasswd
 
           echo "::set-output name=rootfs_dir::$ROOTFS"
-
-      - name: Save rootfs path for later steps
-        id: set-rootfs-dir
-        run: echo "::set-output name=rootfs_dir::${{ steps.build-base.outputs.rootfs_dir }}"
+        env:
+          TZ: ${{ github.event.inputs.timezone }}
 
   build-container:
     name: Build & Push Container Image
@@ -74,7 +74,7 @@ jobs:
 
       - name: Build container image from rootfs
         run: |
-          ROOTFS_DIR="${{ needs.prepare.outputs.rootfs_dir }}"
+          export ROOTFS="/arch-root"
           # Create a container image from the directory. For example, using podman, you can use:
           sudo podman import $ROOTFS_DIR custom-arch-base:latest
           # Tag the image for GitHub Container Registry (ghcr.io/<OWNER>/<REPO>:tag)
@@ -103,8 +103,8 @@ jobs:
 
       - name: Build ISO using systemd-boot
         run: |
-          ROOTFS_DIR="${{ needs.prepare.outputs.rootfs_dir }}"
-          ISO_DIR="/tmp/arch-iso"
+          ROOTFS="/arch-root"
+          export ISO_DIR="/arch-iso"
           mkdir -p $ISO_DIR
           # Copy or install systemd-boot bootloader into the ISO directory:
           sudo bootctl --path=$ISO_DIR install
