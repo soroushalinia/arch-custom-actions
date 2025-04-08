@@ -22,43 +22,37 @@ jobs:
   prepare:
     name: Prepare Base RootFS
     runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
     outputs:
       rootfs_dir: ${{ steps.set-rootfs-dir.outputs.rootfs_dir }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        shell: bash
+      - name: Install dependencies in Arch container
         run: |
-          set -e
-          sudo apt update
-          sudo apt install -y grub-efi-amd64-bin xorriso zstd arch-install-scripts
+          pacman -Sy --noconfirm arch-install-scripts
+          # Additional tools may need to be installed via pacman or via package management workarounds
 
       - name: Generate base system
         id: build-base
-        shell: bash
         run: |
           set -e
           ROOTFS="/tmp/arch-root"
-          sudo mkdir -p $ROOTFS
-          sudo pacstrap $ROOTFS base linux linux-firmware git curl nano btrfs-progs \
+          mkdir -p $ROOTFS
+          pacstrap $ROOTFS base linux linux-firmware git curl nano btrfs-progs \
             intel-ucode amd-ucode podman toolbox networkmanager openssh sudo zsh dosfstools
 
           # Replace pacman.conf and mirrorlist with your own if needed.
-          sudo cp workspace/rootfs/pacman.conf $ROOTFS/etc/pacman.conf
-          sudo cp workspace/rootfs/mirrorlist $ROOTFS/etc/pacman.d/mirrorlist
+          cp workspace/rootfs/pacman.conf $ROOTFS/etc/pacman.conf
+          cp workspace/rootfs/mirrorlist $ROOTFS/etc/pacman.d/mirrorlist
 
-          sudo ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} $ROOTFS/etc/localtime
-          echo "${{ github.event.inputs.timezone }}" | sudo tee $ROOTFS/etc/timezone
+          ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} $ROOTFS/etc/localtime
+          echo "${{ github.event.inputs.timezone }}" | tee $ROOTFS/etc/timezone
 
           # Create user
-          sudo arch-chroot $ROOTFS useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
-          echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | sudo arch-chroot $ROOTFS chpasswd
+          arch-chroot $ROOTFS useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
+          echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | arch-chroot $ROOTFS chpasswd
 
           echo "::set-output name=rootfs_dir::$ROOTFS"
-        env:
-          TZ: ${{ github.event.inputs.timezone }}
 
       - name: Save rootfs path for later steps
         id: set-rootfs-dir
