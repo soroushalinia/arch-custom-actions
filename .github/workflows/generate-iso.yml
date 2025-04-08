@@ -1,0 +1,79 @@
+name: Build Arch ISO from RootFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      iso_name:
+        description: "The name of the ISO file to create (e.g., arch-custom.iso)"
+        required: true
+        default: "arch-custom.iso"
+      timezone:
+        description: "System timezone to propagate if needed"
+        required: true
+        default: "UTC"
+
+jobs:
+  build_iso:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download RootFS Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: arch-installation
+          path: rootfs_artifact
+
+      - name: Prepare ISO image from rootfs
+        shell: bash
+        run: |
+          set -e
+          echo "Installing required packages..."
+          sudo apt update
+          sudo apt install -y grub-efi-amd64-bin xorriso zstd
+
+          echo "Creating directory structure..."
+          mkdir -p iso/EFI/boot iso/boot iso/grub
+          mkdir -p rootfs
+
+          echo "Extracting rootfs..."
+          zstd -d -c rootfs_artifact/arch-custom-rootfs.tar.zst | tar -xf - -C rootfs
+
+          echo "Copying kernel and initramfs..."
+          cp rootfs/boot/vmlinuz-linux iso/boot/
+          cp rootfs/boot/initramfs-linux.img iso/boot/
+
+          echo "Creating GRUB config..."
+          cat << 'EOF' > iso/grub/grub.cfg
+            menuentry "Arch Linux" {
+            linux /boot/vmlinuz-linux root=live:CDLABEL=ARCH_CUSTOM rw quiet
+            initrd /boot/initramfs-linux.img
+            }
+            EOF
+
+          echo "Generating EFI bootloader..."
+          grub-mkstandalone \
+            --format=x86_64-efi \
+            --output=iso/EFI/boot/bootx64.efi \
+            --locales="" \
+            --fonts="" \
+            "boot/grub/grub.cfg=iso/grub/grub.cfg"
+
+          echo "Building ISO image..."
+          xorriso -as mkisofs \
+            -iso-level 3 \
+            -full-iso9660-filenames \
+            -volid "ARCH_CUSTOM" \
+            -eltorito-alt-boot \
+            -e EFI/boot/bootx64.efi \
+            -no-emul-boot \
+            -isohybrid-gpt-basdat \
+            -o "${{ github.event.inputs.iso_name }}" \
+            iso
+
+      - name: Upload ISO Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-iso
+          path: ${{ github.event.inputs.iso_name }}
