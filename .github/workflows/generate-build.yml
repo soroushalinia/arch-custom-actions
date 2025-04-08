@@ -1,0 +1,151 @@
+name: Build Custom Arch Base
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "Username for the system"
+        required: true
+      password:
+        description: "Password for the user"
+        required: true
+      shell:
+        description: "Shell path for the user (use /usr/bin/zsh if you have zsh installed)"
+        required: true
+        default: "/usr/bin/bash"
+      timezone:
+        description: "Timezone for the system (e.g., America/New_York)"
+        required: true
+        default: "America/New_York"
+
+jobs:
+  prepare:
+    name: Prepare Base RootFS
+    runs-on: ubuntu-latest
+    outputs:
+      rootfs_dir: ${{ steps.set-rootfs-dir.outputs.rootfs_dir }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -e
+          sudo apt update
+          sudo apt install -y grub-efi-amd64-bin xorriso zstd arch-install-scripts
+
+      - name: Generate base system
+        id: build-base
+        shell: bash
+        run: |
+          set -e
+          ROOTFS="/tmp/arch-root"
+          sudo mkdir -p $ROOTFS
+          sudo pacstrap $ROOTFS base linux linux-firmware git curl nano btrfs-progs \
+            intel-ucode amd-ucode podman toolbox networkmanager openssh sudo zsh dosfstools
+
+          # Replace pacman.conf and mirrorlist with your own if needed.
+          sudo cp workspace/rootfs/pacman.conf $ROOTFS/etc/pacman.conf
+          sudo cp workspace/rootfs/mirrorlist $ROOTFS/etc/pacman.d/mirrorlist
+
+          sudo ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} $ROOTFS/etc/localtime
+          echo "${{ github.event.inputs.timezone }}" | sudo tee $ROOTFS/etc/timezone
+
+          # Create user
+          sudo arch-chroot $ROOTFS useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
+          echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | sudo arch-chroot $ROOTFS chpasswd
+
+          echo "::set-output name=rootfs_dir::$ROOTFS"
+        env:
+          TZ: ${{ github.event.inputs.timezone }}
+
+      - name: Save rootfs path for later steps
+        id: set-rootfs-dir
+        run: echo "::set-output name=rootfs_dir::${{ steps.build-base.outputs.rootfs_dir }}"
+
+  build-container:
+    name: Build & Push Container Image
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up container tools (podman)
+        run: |
+          # Podman can be installed on Ubuntu; if you prefer Docker, adjust accordingly.
+          sudo apt update
+          sudo apt install -y podman
+
+      - name: Build container image from rootfs
+        run: |
+          ROOTFS_DIR="${{ needs.prepare.outputs.rootfs_dir }}"
+          # Create a container image from the directory. For example, using podman, you can use:
+          sudo podman import $ROOTFS_DIR custom-arch-base:latest
+          # Tag the image for GitHub Container Registry (ghcr.io/<OWNER>/<REPO>:tag)
+          sudo podman tag custom-arch-base:latest ghcr.io/${{ github.repository_owner }}/custom-arch-base:latest
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GHCR_TOKEN }}" | sudo podman login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+
+      - name: Push container image to GHCR
+        run: |
+          sudo podman push ghcr.io/${{ github.repository_owner }}/custom-arch-base:latest
+
+  build-iso:
+    name: Build ISO with systemd-boot
+    runs-on: ubuntu-latest
+    needs: prepare
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ISO build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y grub-efi-amd64-bin xorriso systemd-container zstd
+
+      - name: Build ISO using systemd-boot
+        run: |
+          ROOTFS_DIR="${{ needs.prepare.outputs.rootfs_dir }}"
+          ISO_DIR="/tmp/arch-iso"
+          mkdir -p $ISO_DIR
+          # Copy or install systemd-boot bootloader into the ISO directory:
+          sudo bootctl --path=$ISO_DIR install
+
+          # You would need to prepare a loader configuration and entries for your custom Arch base.
+          # For example, create a loader.conf and entries under $ISO_DIR/loader/entries/
+          cat <<EOF | sudo tee $ISO_DIR/loader/loader.conf
+            default  arch
+            timeout  4
+            editor   no
+            EOF
+
+          # Create an entry file (e.g., arch.conf) under loader/entries
+          sudo mkdir -p $ISO_DIR/loader/entries
+          cat <<EOF | sudo tee $ISO_DIR/loader/entries/arch.conf
+            title   Custom Arch Linux
+            linux   /vmlinuz-linux
+            initrd  /initramfs-linux.img
+            ptions root=LABEL=customarch rw
+            EOF
+
+          # Copy kernel and initramfs from rootfs into the ISO. You might have to chroot into your ROOTFS_DIR to build an initramfs.
+          sudo cp $ROOTFS_DIR/boot/vmlinuz-linux $ISO_DIR/
+          sudo cp $ROOTFS_DIR/boot/initramfs-linux.img $ISO_DIR/
+
+          # Generate the ISO using xorriso
+          sudo xorriso -as mkisofs -o custom-arch-linux.iso \
+            -iso-level 3 -full-iso9660-filenames \
+            -V "CustomArch" -b boot/efi.img $ISO_DIR
+
+          # Optionally, you can upload or store the ISO as an artifact:
+          echo "ISO built at custom-arch-linux.iso"
+
+      - name: Upload ISO Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: custom-arch-linux.iso
+          path: custom-arch-linux.iso
