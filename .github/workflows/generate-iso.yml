@@ -3,10 +3,6 @@ name: Build Arch ISO from RootFS
 on:
   workflow_dispatch:
     inputs:
-      iso_name:
-        description: "The name of the ISO file to create"
-        required: true
-        default: "arch-custom.iso"
       username:
         description: "Username for the system"
         required: true
@@ -14,96 +10,63 @@ on:
         description: "Password for the user"
         required: true
       shell:
-        description: "User's shell path"
+        description: "Shell path for the user (use /usr/bin/zsh if you have zsh installed)"
         required: true
         default: "/usr/bin/bash"
       timezone:
         description: "Timezone for the system"
         required: true
         default: "UTC"
+      iso_name:
+        description: "The name of the ISO file to create"
+        required: true
+        default: "arch-custom.iso"
 
 jobs:
-  build_rootfs:
+  build_iso:
     runs-on: ubuntu-latest
-    outputs:
-      artifact-name: ${{ steps.set-artifact.outputs.name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build Arch RootFS
-        run: |
-          docker run --privileged --rm -v "$(pwd)":/workspace -v /mnt:/mnt archlinux:latest bash -c '
-            set -e
-            pacman -Sy --noconfirm arch-install-scripts
-
-            mkdir -p /mnt/arch-root
-            pacstrap /mnt/arch-root base linux linux-firmware git curl nano ukify btrfs-progs \
-              intel-ucode amd-ucode podman toolbox networkmanager openssh sudo zsh dosfstools
-
-            cp /workspace/rootfs/pacman.conf /mnt/arch-root/etc/pacman.conf
-            cp /workspace/rootfs/mirrorlist /mnt/arch-root/etc/pacman.d/mirrorlist
-
-            ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} /mnt/arch-root/etc/localtime
-            echo "${{ github.event.inputs.timezone }}" > /mnt/arch-root/etc/timezone
-
-            arch-chroot /mnt/arch-root useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
-            echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | arch-chroot /mnt/arch-root chpasswd
-
-            tar --zstd --numeric-owner --xattrs --acls -C /mnt/arch-root -cf /workspace/arch-custom-rootfs.tar.zst \
-              --exclude=./{.dockerenv,.dockerinit,sys/*,proc/*,dev/*,etc/machine-id,etc/resolv.conf} \
-              --exclude=./etc/pacman.d/gnupg/* \
-              --exclude=./{root,tmp,var/tmp,var/cache/pacman/pkg,var/lib/pacman/sync}/* \
-              .
-          '
-
-      - name: Upload RootFS Artifact
-        id: set-artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: arch-installation
-          path: arch-custom-rootfs.tar.zst
-
-  build_iso:
-    needs: build_rootfs
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Download RootFS Artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: arch-installation
-          path: rootfs_artifact
-
-      - name: Prepare ISO image from rootfs
+      - name: Build RootFS and ISO
         shell: bash
         run: |
           set -e
+
           echo "Installing required packages..."
           sudo apt update
-          sudo apt install -y grub-efi-amd64-bin xorriso zstd
+          sudo apt install -y grub-efi-amd64-bin xorriso zstd debootstrap arch-install-scripts
 
+          echo "Creating rootfs..."
+          mkdir -p arch-root
+          sudo pacstrap -K arch-root base linux linux-firmware git curl nano ukify btrfs-progs \
+            intel-ucode amd-ucode podman toolbox networkmanager openssh sudo zsh dosfstools
+
+          echo "Setting timezone..."
+          ln -sf /usr/share/zoneinfo/${{ github.event.inputs.timezone }} arch-root/etc/localtime
+          echo "${{ github.event.inputs.timezone }}" > arch-root/etc/timezone
+
+          echo "Creating user..."
+          sudo arch-chroot arch-root useradd -m -G wheel -s ${{ github.event.inputs.shell }} ${{ github.event.inputs.username }}
+          echo "${{ github.event.inputs.username }}:${{ github.event.inputs.password }}" | sudo arch-chroot arch-root chpasswd
+
+          echo "Creating directory structure for ISO..."
           mkdir -p iso/EFI/boot iso/boot iso/grub
-          mkdir -p rootfs
-
-          echo "Extracting rootfs..."
-          zstd -d -c rootfs_artifact/arch-custom-rootfs.tar.zst | tar -xf - -C rootfs
 
           echo "Copying kernel and initramfs..."
-          cp rootfs/boot/vmlinuz-linux iso/boot/
-          cp rootfs/boot/initramfs-linux.img iso/boot/
+          cp arch-root/boot/vmlinuz-linux iso/boot/
+          cp arch-root/boot/initramfs-linux.img iso/boot/
 
           echo "Creating GRUB config..."
           cat << 'EOF' > iso/grub/grub.cfg
             menuentry "Arch Linux" {
-            linux /boot/vmlinuz-linux root=live:CDLABEL=ARCH_CUSTOM rw quiet
-            initrd /boot/initramfs-linux.img
+              linux /boot/vmlinuz-linux root=live:CDLABEL=ARCH_CUSTOM rw quiet
+              initrd /boot/initramfs-linux.img
             }
             EOF
 
-          echo "Generating EFI bootloader..."
+          echo "Generating GRUB EFI binary..."
           grub-mkstandalone \
             --format=x86_64-efi \
             --output=iso/EFI/boot/bootx64.efi \
@@ -111,7 +74,7 @@ jobs:
             --fonts="" \
             "boot/grub/grub.cfg=iso/grub/grub.cfg"
 
-          echo "Building ISO image..."
+          echo "Building ISO..."
           xorriso -as mkisofs \
             -iso-level 3 \
             -full-iso9660-filenames \
@@ -120,10 +83,10 @@ jobs:
             -e EFI/boot/bootx64.efi \
             -no-emul-boot \
             -isohybrid-gpt-basdat \
-            -o "${{ github.event.inputs.iso_name }}" \
+            -o ${{ github.event.inputs.iso_name }} \
             iso
 
-      - name: Upload ISO Artifact
+      - name: Upload ISO
         uses: actions/upload-artifact@v4
         with:
           name: arch-iso
